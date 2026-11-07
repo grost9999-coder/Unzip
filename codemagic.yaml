@@ -51,11 +51,15 @@ workflows:
       - TestResults.xcresult
       - build/PocketUnzip.xcarchive
   ios-signed-ipa:
-    name: iOS - signed IPA (Apple signing required)
+    name: iOS - signed IPA + TestFlight
     instance_type: mac_mini_m2
     max_build_duration: 40
+    integrations:
+      app_store_connect: Codemagic-ClearPocket
     environment:
       xcode: latest
+      vars:
+        APP_STORE_APPLE_ID: 6831873729
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.grost9999.pocketunzip
@@ -64,8 +68,11 @@ workflows:
       - name: Set unique build number
         script: |
           set -euo pipefail
-          : "${BUILD_NUMBER:?Codemagic build number is missing}"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $((BUILD_NUMBER + 2))" PocketUnzip/Info.plist
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
+          LATEST=${LATEST:-0}
+          NEXT=$((LATEST + 1))
+          echo "TestFlight build number -> $NEXT"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEXT" PocketUnzip/Info.plist
       - name: Apply existing signing profiles
         script: |
           set -euo pipefail
@@ -78,3 +85,7 @@ workflows:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
       - build/ios/xcarchive/*.xcarchive
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
