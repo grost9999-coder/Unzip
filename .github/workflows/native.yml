@@ -36,7 +36,7 @@ jobs:
           with open(os.environ['GITHUB_ENV'],'a') as f:f.write('SIMULATOR_ID='+phones[0]['udid']+'\n')
           PY
       - name: Test native app including 201 MiB extraction
-        run: xcodebuild test -project PocketUnzip.xcodeproj -scheme PocketUnzip -destination "platform=iOS Simulator,id=$SIMULATOR_ID" CODE_SIGNING_ALLOWED=NO -resultBundlePath TestResults.xcresult
+        run: xcodebuild test -project PocketUnzip.xcodeproj -scheme PocketUnzip -destination "platform=iOS Simulator,id=$SIMULATOR_ID,arch=arm64" ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -resultBundlePath TestResults.xcresult
       - name: Build unsigned device archive
         run: xcodebuild archive -project PocketUnzip.xcodeproj -scheme PocketUnzip -destination 'generic/platform=iOS' -archivePath build/PocketUnzip.xcarchive CODE_SIGNING_ALLOWED=NO
       - uses: actions/upload-artifact@v4
