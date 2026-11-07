@@ -1,0 +1,80 @@
+# Native iPhone app. No web wrapper or browser runtime.
+# ios-signed-ipa requires an existing Apple Distribution certificate and
+# App Store profile for com.grost9999.pocketunzip in Codemagic signing identities.
+workflows:
+  ios-verify:
+    name: iOS - build and test (no signing)
+    instance_type: mac_mini_m2
+    max_build_duration: 40
+    environment:
+      xcode: latest
+    scripts:
+      - &unpack-source
+        name: Open native Xcode project
+        script: |
+          set -euo pipefail
+          cd "$CM_BUILD_DIR"
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          root=Path.cwd().resolve()
+          with zipfile.ZipFile('NativeSource.zip') as archive:
+              for item in archive.infolist():
+                  path=Path(item.filename)
+                  if path.parts and path.parts[0]=='.github': continue
+                  if not (root/path).resolve().is_relative_to(root):
+                      raise SystemExit('Unsafe source path')
+                  archive.extract(item,root)
+          assert (root/'PocketUnzip.xcodeproj/project.pbxproj').is_file()
+          PY
+      - name: Resolve Swift packages
+        script: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies -project PocketUnzip.xcodeproj -scheme PocketUnzip
+      - name: Run native extraction tests (includes 201 MiB ZIP)
+        script: |
+          set -euo pipefail
+          SIMULATOR_ID=$(python3 - <<'PY'
+          import json,subprocess
+          devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json']))
+          phones=[d for runtime,group in devices['devices'].items() if '.iOS-' in runtime for d in group if 'iPhone' in d['name']]
+          if not phones: raise SystemExit('No available iPhone simulator')
+          print(phones[0]['udid'])
+          PY
+          )
+          xcodebuild test -project PocketUnzip.xcodeproj -scheme PocketUnzip -destination "platform=iOS Simulator,id=$SIMULATOR_ID,arch=arm64" ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -resultBundlePath TestResults.xcresult
+      - name: Build unsigned device archive
+        script: |
+          set -euo pipefail
+          xcodebuild archive -project PocketUnzip.xcodeproj -scheme PocketUnzip -destination 'generic/platform=iOS' -archivePath build/PocketUnzip.xcarchive CODE_SIGNING_ALLOWED=NO
+    artifacts:
+      - TestResults.xcresult
+      - build/PocketUnzip.xcarchive
+  ios-signed-ipa:
+    name: iOS - signed IPA (Apple signing required)
+    instance_type: mac_mini_m2
+    max_build_duration: 40
+    environment:
+      xcode: latest
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.grost9999.pocketunzip
+    scripts:
+      - *unpack-source
+      - name: Set unique build number
+        script: |
+          set -euo pipefail
+          : "${BUILD_NUMBER:?Codemagic build number is missing}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $((BUILD_NUMBER + 2))" PocketUnzip/Info.plist
+      - name: Apply existing signing profiles
+        script: |
+          set -euo pipefail
+          xcode-project use-profiles
+      - name: Build signed IPA
+        script: |
+          set -euo pipefail
+          xcode-project build-ipa --project "$CM_BUILD_DIR/PocketUnzip.xcodeproj" --scheme PocketUnzip
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - build/ios/xcarchive/*.xcarchive
